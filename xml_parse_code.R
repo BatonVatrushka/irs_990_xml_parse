@@ -20,12 +20,23 @@ xml_file %>%
 # we want the info for the schedule J 
 # which is the compensation information
 # =====================================
+# get the EIN (tax number)
+ein <- xml_file %>%
+  xml_find_first(xpath = "//d1:EIN") %>%
+  xml_text()
+
+# get the tax year
+taxyr <- xml_file %>%
+  xml_find_first(xpath = "//d1:TaxYr") %>%
+  xml_text()
+
 # get the names of the fields
 names <- xml_file %>% 
   xml_find_all(xpath = "//d1:IRS990ScheduleJ") %>%
   xml_children() %>%
   xml_children() %>%
   xml_name()
+
 # get the values of the fields
 values <- xml_file %>% 
   xml_find_all(xpath = "//d1:IRS990ScheduleJ") %>%
@@ -33,8 +44,11 @@ values <- xml_file %>%
   xml_children() %>%
   xml_text()
 
-
-
+# Enter the Matrix
+mat <- matrix(c(ein, taxyr, values)
+              , ncol = length(values) + length(ein) + length(taxyr)
+              , dimnames = list(NULL, c("ein", "taxyr", names))
+              , byrow = T)
 
 
 
