@@ -107,6 +107,7 @@ test <- xml_comp_parser('xml_files_new/202200069349300100_public.xml')
 files <- list.files(path = './xml_files_new/', full.names = T)
 
 # now run the function over the files
+# and store the matrices in a list (comp = compensation)
 comp <- files %>%
   map(possibly(xml_comp_parser
                , otherwise = NA_real_))
@@ -136,14 +137,52 @@ test_list %>% names()
 # check dim names 
 test_list[[1]] %>% dimnames()
 
-# each sublist is a matrix so each element has a dimname. Set 
-# the element names using the dimnames
+# each sublist is a matrix so each element has column names. Set 
+# the element names using the column names
 
 # set the names to the list using the colnames
 test_list_named <- map(test_list, ~ set_names(.x, colnames(.x)))
 
 # see if it worked
 test_list_named[[3]] %>% names() # success!
+
+# ==============================================================================
+# Set Names
+# ==============================================================================
+# set names for the full list
+comp_named <- map(comp, ~ set_names(.x, colnames(.x)))
+
+# check to make sure the code worked
+comp_named[[3]] %>% names() # success!
+# ==============================================================================
+# Clean Up
+# ==============================================================================
+# The schedule J has information on NGO compensation to CEOs 
+# and "important" types like that in the org. 
+
+# filter out the lists which don't have a schedule J
+# this will be lists w/ an element length of 2
+
+# discard lists where the condition is true
+# first create a mapper to set the condition
+# we want lists whose lengths are > 2
+t <- as_mapper(~ length(.x) > 2)
+
+# now use keep() to filter comp_named
+comp_filtered <- keep(comp_named, t)
+
+# compare lengths
+(orig <- length(comp))
+(fil <- length(comp_filtered))
+# ratio
+fil/orig 
+
+# makes names unique in the lists
+# remember that element names refer to column names in the matrices
+comp_filtered <-
+  map(comp_filtered, ~ set_names(.x
+                                 , .x %>% names() %>% make.names(unique = T)))
+
 
 
 
