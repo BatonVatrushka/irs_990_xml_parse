@@ -64,7 +64,7 @@ schedule_J_parser <- function(files) {
                                     ,"ein|taxyr|PersonNm.*|TitleTxt.*|Total.*"))) %>%
     # row bind the list then create a tibble
     map(., ~ rbind(.) %>% as_tibble()) %>%
-    # ustate rbindlist from data.table
+    # rbindlist from data.table
     # fill = T imputes NAs 
     rbindlist(fill = T)
 } 
