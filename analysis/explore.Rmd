@@ -1,0 +1,233 @@
+---
+title: "IRS 990 — Homeless Services Compensation Explorer"
+output: html_notebook
+---
+
+## Setup
+
+Install packages once if you don't have them:
+```{r install, eval=FALSE}
+install.packages(c("DBI", "RPostgres", "tidyverse", "scales"))
+```
+
+Load and connect:
+```{r setup, message=FALSE}
+library(DBI)
+library(RPostgres)
+library(tidyverse)
+library(scales)
+
+con <- dbConnect(
+  RPostgres::Postgres(),
+  host     = "localhost",
+  port     = 5433,       # Docker is on 5433, not 5432
+  dbname   = "irs990",
+  user     = "irs990",
+  password = "irs990"
+)
+```
+
+---
+
+## How much data do we have?
+
+```{r counts}
+dbGetQuery(con, "
+  SELECT
+    tax_year,
+    COUNT(DISTINCT ein)    AS orgs,
+    COUNT(DISTINCT object_id) AS filings,
+    COUNT(*)               AS comp_records
+  FROM schedule_j_compensation
+  GROUP BY tax_year
+  ORDER BY tax_year
+")
+```
+
+---
+
+## Top cities by number of orgs
+
+```{r top_cities}
+dbGetQuery(con, "
+  SELECT
+    city,
+    state,
+    COUNT(DISTINCT ein) AS orgs
+  FROM schedule_j_compensation
+  WHERE city IS NOT NULL
+  GROUP BY city, state
+  ORDER BY orgs DESC
+  LIMIT 25
+")
+```
+
+---
+
+## Total executive compensation by city/state (all years)
+
+```{r comp_by_city}
+comp_by_city <- dbGetQuery(con, "
+  SELECT
+    city,
+    state,
+    SUM(total_comp_filing_org)          AS total_comp,
+    COUNT(DISTINCT ein)                 AS orgs,
+    COUNT(*)                            AS exec_records,
+    AVG(total_comp_filing_org)          AS avg_exec_comp
+  FROM schedule_j_compensation
+  WHERE total_comp_filing_org > 0
+    AND city IS NOT NULL
+  GROUP BY city, state
+  ORDER BY total_comp DESC
+  LIMIT 30
+")
+
+comp_by_city %>%
+  mutate(
+    total_comp    = dollar(as.numeric(total_comp)),
+    avg_exec_comp = dollar(round(as.numeric(avg_exec_comp)))
+  )
+```
+
+---
+
+## Compensation trend over time — top 10 cities
+
+```{r trend}
+trend <- dbGetQuery(con, "
+  SELECT
+    city,
+    state,
+    tax_year,
+    SUM(total_comp_filing_org) AS total_comp,
+    COUNT(DISTINCT ein)        AS orgs
+  FROM schedule_j_compensation
+  WHERE total_comp_filing_org > 0
+    AND city IN (
+      SELECT city FROM schedule_j_compensation
+      WHERE city IS NOT NULL
+      GROUP BY city
+      ORDER BY COUNT(DISTINCT ein) DESC
+      LIMIT 10
+    )
+  GROUP BY city, state, tax_year
+  ORDER BY city, tax_year
+")
+
+ggplot(trend %>% mutate(total_comp = as.numeric(total_comp)),
+       aes(x = tax_year, y = total_comp, color = city)) +
+  geom_line(linewidth = 1) +
+  geom_point() +
+  scale_y_continuous(labels = dollar_format(scale = 1e-6, suffix = "M")) +
+  labs(
+    title = "Total Exec Compensation — Homeless Services Orgs",
+    subtitle = "Top 10 cities by org count",
+    x = "Tax Year",
+    y = "Total Compensation",
+    color = "City"
+  ) +
+  theme_minimal()
+```
+
+---
+
+## Highest-paid executives across all orgs
+
+```{r top_execs}
+dbGetQuery(con, "
+  SELECT
+    person_name,
+    title,
+    company_name,
+    city,
+    state,
+    tax_year,
+    total_comp_filing_org   AS total_comp,
+    base_compensation,
+    bonus
+  FROM schedule_j_compensation
+  WHERE total_comp_filing_org > 0
+  ORDER BY total_comp_filing_org DESC
+  LIMIT 25
+") %>%
+  mutate(
+    total_comp        = dollar(as.numeric(total_comp)),
+    base_compensation = dollar(as.numeric(base_compensation)),
+    bonus             = dollar(as.numeric(bonus))
+  )
+```
+
+---
+
+## Org-level summary — average CEO pay vs number of filings
+
+```{r org_summary}
+dbGetQuery(con, "
+  SELECT
+    company_name,
+    ein,
+    city,
+    state,
+    ntee_code,
+    COUNT(DISTINCT tax_year)          AS years_filed,
+    AVG(total_comp_filing_org)        AS avg_total_comp,
+    MAX(total_comp_filing_org)        AS max_total_comp
+  FROM schedule_j_compensation
+  WHERE total_comp_filing_org > 0
+  GROUP BY company_name, ein, city, state, ntee_code
+  ORDER BY avg_total_comp DESC
+  LIMIT 30
+") %>%
+  mutate(
+    avg_total_comp = dollar(round(as.numeric(avg_total_comp))),
+    max_total_comp = dollar(as.numeric(max_total_comp))
+  )
+```
+
+---
+
+## Portland vs Los Angeles — side-by-side
+
+```{r pdx_vs_la}
+dbGetQuery(con, "
+  SELECT
+    city,
+    state,
+    tax_year,
+    COUNT(DISTINCT ein)            AS orgs,
+    SUM(total_comp_filing_org)     AS total_exec_comp,
+    AVG(total_comp_filing_org)     AS avg_exec_comp,
+    MAX(total_comp_filing_org)     AS max_exec_comp
+  FROM schedule_j_compensation
+  WHERE (city ILIKE '%portland%'  AND state = 'OR')
+     OR (city ILIKE '%los angeles%' AND state = 'CA')
+  GROUP BY city, state, tax_year
+  ORDER BY city, tax_year
+")
+```
+
+---
+
+## NTEE code breakdown — what types of orgs are in the data?
+
+```{r ntee_breakdown}
+dbGetQuery(con, "
+  SELECT
+    ntee_code,
+    COUNT(DISTINCT ein) AS orgs,
+    SUM(total_comp_filing_org) AS total_comp
+  FROM schedule_j_compensation
+  WHERE ntee_code IS NOT NULL
+  GROUP BY ntee_code
+  ORDER BY orgs DESC
+")
+```
+
+---
+
+## Cleanup
+
+```{r disconnect}
+dbDisconnect(con)
+```
